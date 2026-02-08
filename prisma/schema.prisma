@@ -1,0 +1,1265 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==================== AUTH MODELS (Better-Auth) ====================
+
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  privacyLevel  PrivacyLevel @default(PUBLIC)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  sessions         Session[]
+  accounts         Account[]
+  tasks            Task[]
+  nutritionLogs    NutritionLog[]
+  waterLogs        WaterLog[]
+  microHabits      MicroHabit[]
+  xpTransactions   XpTransaction[]
+  stats            UserStats?
+  profile          UserProfile?
+  timeSlotScores   TimeSlotScore[]
+  energyLogs       EnergyLog[]
+  dailyQuests      DailyQuest[]
+  achievements     UserAchievement[]
+  clanMemberships  ClanMembership[]
+  createdClans     Clan[]            @relation("ClanCreator")
+  sentInvites      ClanInvite[]
+  avatar           UserAvatar?
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("verification")
+}
+
+// ==================== TASK MODELS ====================
+
+model Task {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title            String
+  description      String?
+  category         String    @default("General")
+  priority         TaskPriority @default(MEDIUM)
+  status           TaskStatus   @default(PENDING)
+  
+  scheduledAt      DateTime?
+  dueAt            DateTime?
+  completedAt      DateTime?
+  
+  estimatedMinutes Int?
+  xpReward         Int       @default(20)
+  
+  // Persistence engine fields
+  snoozeCount      Int       @default(0)
+  rescheduleCount  Int       @default(0)
+  lastRescheduledAt DateTime?
+  
+  // Recurrence
+  isRecurring      Boolean   @default(false)
+  recurringPattern String?   // e.g., "daily", "weekly:mon,wed,fri"
+  parentTaskId     String?
+  
+  // Task Dependencies (PRD Section 8.1)
+  dependsOnId      String?   // Task that must be completed first
+  dependsOn        Task?     @relation("TaskDependency", fields: [dependsOnId], references: [id], onDelete: SetNull)
+  blockedTasks     Task[]    @relation("TaskDependency")
+  blockReason      String?   // "Waiting on" description for external blockers
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, scheduledAt])
+  @@index([userId, category])
+  @@index([dependsOnId])
+  @@map("task")
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SNOOZED
+  ESCALATED
+  BLOCKED      // Waiting on dependency
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ==================== NUTRITION MODELS ====================
+
+model NutritionLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name      String
+  calories  Int
+  protein   Float?
+  carbs     Float?
+  fat       Float?
+  mealType  MealType @default(SNACK)
+  
+  loggedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([userId, loggedAt])
+  @@map("nutrition_log")
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+model WaterLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  glasses   Int      @default(1)
+  loggedAt  DateTime @default(now())
+
+  @@index([userId, loggedAt])
+  @@map("water_log")
+}
+
+model UserProfile {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  age           Int?
+  weight        Float?   // kg
+  height        Float?   // cm
+  gender        Gender?
+  activityLevel ActivityLevel?
+  fitnessGoal   FitnessGoal?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("user_profile")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  ACTIVE
+  VERY_ACTIVE
+}
+
+enum FitnessGoal {
+  LOSE
+  MAINTAIN
+  GAIN
+}
+
+// ==================== MICRO-HABITS MODELS ====================
+
+model MicroHabit {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name        String
+  description String?
+  icon        String   @default("✓")
+  targetDays  Int      @default(7) // days per week
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  logs        HabitLog[]
+
+  @@index([userId])
+  @@map("micro_habit")
+}
+
+model HabitLog {
+  id        String     @id @default(uuid())
+  habitId   String
+  habit     MicroHabit @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  
+  completed Boolean    @default(false)
+  loggedAt  DateTime   @default(now())
+
+  @@index([habitId, loggedAt])
+  @@map("habit_log")
+}
+
+// ==================== GAMIFICATION MODELS ====================
+
+model XpTransaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  amount      Int
+  source      XpSource
+  sourceId    String?  // ID of task, habit, etc.
+  description String?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, source])
+  @@map("xp_transaction")
+}
+
+enum XpSource {
+  TASK_COMPLETION
+  HABIT_COMPLETION
+  NUTRITION_LOG
+  STREAK_BONUS
+  QUEST_COMPLETION
+  FEEDBACK
+  WEEKLY_PLANNING
+  JOURNALING
+  CLAN_ACTIVITY
+  CLAN_TASK
+}
+
+model UserStats {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  totalXp         Int      @default(0)
+  level           Int      @default(1)
+  
+  tasksCompleted  Int      @default(0)
+  habitsCompleted Int      @default(0)
+  
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  streakFreezes   Int      @default(1)
+  lastActivityDate DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("user_stats")
+}
+
+model Achievement {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  icon        String
+  category    String   // "tasks", "streaks", "nutrition", "social"
+  
+  // Unlock criteria
+  criteria    String   // JSON string with unlock conditions
+  xpReward    Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  
+  users       UserAchievement[]
+
+  @@map("achievement")
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([userId, achievementId])
+  @@map("user_achievement")
+}
+
+model DailyQuest {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title       String
+  description String?
+  type        String   // "TASKS", "NUTRITION", "HABIT", etc.
+  target      Int      @default(1)
+  xpReward    Int      @default(25)
+  
+  completed   Boolean  @default(false)
+  completedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("daily_quest")
+}
+
+// ==================== DECISION ENGINE MODELS ====================
+
+model TimeSlotScore {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  timeSlot      String   // "EARLY_MORNING", "MORNING", etc.
+  category      String   // Task category
+  
+  totalAttempts Int      @default(0)
+  completions   Int      @default(0)
+  snoozes       Int      @default(0)
+  ignores       Int      @default(0)
+  
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, timeSlot, category])
+  @@index([userId, category])
+  @@map("time_slot_score")
+}
+
+model EnergyLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  level     Int      // 1-5
+  note      String?
+  loggedAt  DateTime @default(now())
+
+  @@index([userId, loggedAt])
+  @@map("energy_log")
+}
+
+// ==================== SOCIAL MODELS ====================
+
+model Clan {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  type        ClanType @default(GENERAL)
+  isPublic    Boolean  @default(true)
+  
+  createdBy   String
+  creator     User     @relation("ClanCreator", fields: [createdBy], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  members     ClanMembership[]
+  invites     ClanInvite[]
+  tasks       ClanTask[]
+
+  @@index([type, isPublic])
+  @@map("clan")
+}
+
+enum ClanType {
+  STUDY
+  FITNESS
+  CAREER
+  GENERAL
+}
+
+model ClanMembership {
+  id        String   @id @default(uuid())
+  clanId    String
+  clan      Clan     @relation(fields: [clanId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  role      ClanRole @default(MEMBER)
+  joinedAt  DateTime @default(now())
+
+  @@unique([clanId, userId])
+  @@map("clan_membership")
+}
+
+enum ClanRole {
+  LEADER
+  ADMIN
+  MEMBER
+}
+
+model ClanInvite {
+  id           String   @id @default(uuid())
+  clanId       String
+  clan         Clan     @relation(fields: [clanId], references: [id], onDelete: Cascade)
+  
+  invitedEmail String
+  invitedBy    String
+  inviter      User     @relation(fields: [invitedBy], references: [id])
+  
+  status       InviteStatus @default(PENDING)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([clanId, status])
+  @@index([invitedEmail])
+  @@map("clan_invite")
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+// ==================== TASK TEMPLATES ====================
+
+model TaskTemplate {
+  id          String   @id @default(uuid())
+  userId      String?  // null for system templates
+  
+  name        String
+  description String?
+  category    String   @default("General")
+  icon        String   @default("📋")
+  isPublic    Boolean  @default(false)
+  isSystem    Boolean  @default(false)
+  
+  // Template definition - JSON array of task definitions
+  tasks       Json     // [{title, description, category, priority, estimatedMinutes, order}]
+  
+  useCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isPublic, category])
+  @@map("task_template")
+}
+
+// ==================== WEEKLY PLANNING ====================
+
+model WeeklyPlan {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  weekStart   DateTime // Monday of the week
+  weekEnd     DateTime // Sunday of the week
+  
+  // Review of previous week
+  tasksPlanned     Int @default(0)
+  tasksCompleted   Int @default(0)
+  completionRate   Float @default(0)
+  
+  // Planning status
+  planningCompleted Boolean  @default(false)
+  planningCompletedAt DateTime?
+  
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  priorities  WeeklyPriority[]
+
+  @@unique([userId, weekStart])
+  @@index([userId, weekStart])
+  @@map("weekly_plan")
+}
+
+model WeeklyPriority {
+  id          String     @id @default(uuid())
+  weeklyPlanId String
+  weeklyPlan  WeeklyPlan @relation(fields: [weeklyPlanId], references: [id], onDelete: Cascade)
+  
+  title       String
+  description String?
+  order       Int        @default(0) // 1, 2, 3 for top 3 priorities
+  completed   Boolean    @default(false)
+  
+  createdAt   DateTime   @default(now())
+
+  @@index([weeklyPlanId])
+  @@map("weekly_priority")
+}
+
+// ==================== WELLBEING & FOCUS ====================
+
+model BurnoutSignal {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  signalType  BurnoutSignalType
+  value       Float    // The measured value
+  threshold   Float    // The threshold that was exceeded
+  message     String?
+  
+  acknowledged Boolean @default(false)
+  acknowledgedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, acknowledged])
+  @@map("burnout_signal")
+}
+
+enum BurnoutSignalType {
+  COMPLETION_DROP      // >20% week-over-week drop
+  HIGH_SNOOZE_RATE     // Snooze frequency increasing
+  LOW_ENERGY_STREAK    // 3+ days with energy <3
+  TASK_DELAY_PATTERN   // Tasks consistently pushed to end of day
+  RECOVERY_SUGGESTED   // System suggests recovery mode
+}
+
+model RecoveryMode {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  startedAt   DateTime @default(now())
+  endsAt      DateTime
+  reason      String?
+  
+  // Reduced targets during recovery
+  reducedTaskTarget Int @default(3)
+  
+  active      Boolean  @default(true)
+  completedAt DateTime?
+
+  @@index([userId, active])
+  @@map("recovery_mode")
+}
+
+model FocusSession {
+  id          String   @id @default(uuid())
+  userId      String
+  taskId      String?
+  
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  
+  plannedMinutes Int   @default(25) // Pomodoro default
+  actualMinutes  Int?
+  
+  completed   Boolean  @default(false)
+  feedback    String?  // "completed", "interrupted", "extended"
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, taskId])
+  @@map("focus_session")
+}
+
+model BreakLog {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  breakType   BreakType
+  duration    Int      // minutes
+  activity    String?  // "walk", "hydrate", "stretch", etc.
+  
+  triggeredBy String?  // "system", "user", "pomodoro"
+  
+  loggedAt    DateTime @default(now())
+
+  @@index([userId, loggedAt])
+  @@map("break_log")
+}
+
+enum BreakType {
+  SHORT      // 5 min
+  MEDIUM     // 15 min
+  LONG       // 30+ min
+  RECOVERY   // Extended break during recovery mode
+}
+
+// ==================== GOALS ====================
+
+model Goal {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  title       String
+  description String?
+  category    String   @default("General")
+  
+  // Target date
+  targetDate  DateTime?
+  
+  // Progress tracking
+  totalTasks    Int @default(0)
+  completedTasks Int @default(0)
+  progressPercent Float @default(0)
+  
+  status      GoalStatus @default(ACTIVE)
+  completedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  milestones  GoalMilestone[]
+
+  @@index([userId, status])
+  @@map("goal")
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  ABANDONED
+}
+
+model GoalMilestone {
+  id          String   @id @default(uuid())
+  goalId      String
+  goal        Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  
+  title       String
+  description String?
+  order       Int      @default(0)
+  
+  completed   Boolean  @default(false)
+  completedAt DateTime?
+  
+  // Link to tasks
+  linkedTaskIds Json?  // Array of task IDs
+  
+  createdAt   DateTime @default(now())
+
+  @@index([goalId])
+  @@map("goal_milestone")
+}
+
+// ==================== JOURNALING ====================
+
+model JournalPrompt {
+  id          String   @id @default(uuid())
+  
+  promptText  String
+  type        JournalPromptType
+  category    String   @default("reflection")
+  
+  isActive    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+
+  @@index([type, isActive])
+  @@map("journal_prompt")
+}
+
+enum JournalPromptType {
+  WEEKLY     // Sunday/Monday prompts
+  MONTHLY    // End of month
+  MILESTONE  // After achievements
+  DAILY      // Daily reflection
+}
+
+model JournalEntry {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  promptId    String?  // Optional - can be free-form
+  promptText  String?  // Store the prompt at time of writing
+  
+  content     String
+  mood        Int?     // 1-5 scale
+  
+  isSharedToClan Boolean @default(false)
+  sharedClanId   String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("journal_entry")
+}
+
+// ==================== APPLICATION TRACKING ====================
+
+model Application {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  company     String
+  position    String
+  url         String?
+  
+  status      ApplicationStatus @default(APPLIED)
+  appliedAt   DateTime @default(now())
+  
+  // Follow-up tracking
+  lastFollowUp DateTime?
+  nextFollowUp DateTime?
+  followUpCount Int @default(0)
+  
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, nextFollowUp])
+  @@map("application")
+}
+
+enum ApplicationStatus {
+  SAVED       // Bookmarked, not applied
+  APPLIED
+  PHONE_SCREEN
+  INTERVIEW
+  FINAL_ROUND
+  OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+// ==================== COLLABORATIVE TASKS ====================
+
+model ClanTask {
+  id          String   @id @default(uuid())
+  clanId      String
+  clan        Clan     @relation(fields: [clanId], references: [id], onDelete: Cascade)
+  createdBy   String
+  
+  title       String
+  description String?
+  category    String   @default("General")
+  
+  dueAt       DateTime?
+  xpReward    Int      @default(30)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  completions ClanTaskCompletion[]
+
+  @@index([clanId, dueAt])
+  @@map("clan_task")
+}
+
+model ClanTaskCompletion {
+  id          String   @id @default(uuid())
+  clanTaskId  String
+  clanTask    ClanTask @relation(fields: [clanTaskId], references: [id], onDelete: Cascade)
+  userId      String
+  
+  completedAt DateTime @default(now())
+
+  @@unique([clanTaskId, userId])
+  @@map("clan_task_completion")
+}
+
+// ==================== SLEEP & MOOD TRACKING ====================
+
+model SleepLog {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  sleepStart  DateTime
+  sleepEnd    DateTime
+  duration    Int      // minutes
+  quality     Int      // 1-5 scale
+  
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId, sleepStart])
+  @@map("sleep_log")
+}
+
+model MoodLog {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  level       Int      // 1-5 scale
+  emoji       String?  // 😊, 😐, 😔, etc.
+  note        String?
+  
+  loggedAt    DateTime @default(now())
+
+  @@index([userId, loggedAt])
+  @@map("mood_log")
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model DeviceToken {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  token       String   @unique
+  platform    Platform
+  deviceName  String?
+  
+  isActive    Boolean  @default(true)
+  lastUsedAt  DateTime @default(now())
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, isActive])
+  @@map("device_token")
+}
+
+enum Platform {
+  IOS
+  ANDROID
+  WEB
+}
+
+model NotificationPreference {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  
+  // Notification types
+  taskReminders         Boolean  @default(true)
+  taskEscalations       Boolean  @default(true)
+  streakReminders       Boolean  @default(true)
+  socialUpdates         Boolean  @default(true)
+  clanActivity          Boolean  @default(true)
+  weeklyDigest          Boolean  @default(true)
+  achievementUnlocks    Boolean  @default(true)
+  
+  // Quiet hours
+  quietHoursEnabled     Boolean  @default(false)
+  quietHoursStart       String?  // "22:00"
+  quietHoursEnd         String?  // "08:00"
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("notification_preference")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  type        NotificationType
+  title       String
+  body        String
+  data        Json?    // Additional payload
+  
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  
+  // Delivery tracking
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  failedAt    DateTime?
+  failureReason String?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, type])
+  @@map("notification")
+}
+
+enum NotificationType {
+  TASK_REMINDER
+  TASK_ESCALATION
+  TASK_OVERDUE
+  STREAK_WARNING
+  STREAK_ACHIEVED
+  ACHIEVEMENT_UNLOCKED
+  CLAN_INVITE
+  CLAN_ACTIVITY
+  CLAN_TASK
+  WEEKLY_DIGEST
+  BURNOUT_WARNING
+  BREAK_SUGGESTION
+  GOAL_MILESTONE
+  SYSTEM
+}
+
+// ==================== CALENDAR INTEGRATION ====================
+
+model CalendarConnection {
+  id            String   @id @default(uuid())
+  userId        String
+  
+  provider      CalendarProvider
+  accessToken   String
+  refreshToken  String?
+  expiresAt     DateTime?
+  
+  calendarId    String?  // Primary calendar ID
+  calendarName  String?
+  isActive      Boolean  @default(true)
+  
+  lastSyncedAt  DateTime?
+  syncError     String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  events        CalendarEvent[]
+
+  @@unique([userId, provider])
+  @@map("calendar_connection")
+}
+
+enum CalendarProvider {
+  GOOGLE
+  OUTLOOK
+  APPLE
+}
+
+model CalendarEvent {
+  id              String   @id @default(uuid())
+  connectionId    String
+  connection      CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  
+  externalId      String   // ID from the calendar provider
+  title           String
+  description     String?
+  location        String?
+  
+  startTime       DateTime
+  endTime         DateTime
+  isAllDay        Boolean  @default(false)
+  
+  // For conflict detection
+  isBusy          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([connectionId, externalId])
+  @@index([connectionId, startTime])
+  @@map("calendar_event")
+}
+
+// ==================== AVATAR SYSTEM ====================
+
+enum ItemRarity {
+  COMMON
+  UNCOMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+enum ItemCategory {
+  SKIN_TONE
+  HAIR
+  FACE
+  TOP
+  BOTTOM
+  ACCESSORY
+  BACKGROUND
+  EFFECT
+}
+
+model AvatarItem {
+  id             String       @id @default(uuid())
+  name           String
+  description    String?
+  category       ItemCategory
+  rarity         ItemRarity   @default(COMMON)
+  
+  imageUrl       String
+  previewUrl     String?
+  
+  // Unlock requirements
+  levelRequired  Int          @default(1)
+  xpCost         Int          @default(0)
+  isDefault      Boolean      @default(false)
+  isLimited      Boolean      @default(false)
+  
+  createdAt      DateTime     @default(now())
+  
+  owners         UserAvatarItem[]
+
+  @@index([category, rarity])
+  @@map("avatar_item")
+}
+
+model UserAvatar {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Equipped items by category
+  skinToneId     String?
+  hairId         String?
+  faceId         String?
+  topId          String?
+  bottomId       String?
+  accessoryId    String?
+  backgroundId   String?
+  effectId       String?
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  items          UserAvatarItem[]
+
+  @@map("user_avatar")
+}
+
+model UserAvatarItem {
+  id           String     @id @default(uuid())
+  userId       String
+  avatar       UserAvatar @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  itemId       String
+  item         AvatarItem @relation(fields: [itemId], references: [id])
+  
+  acquiredAt   DateTime   @default(now())
+  acquiredBy   String     @default("PURCHASE") // PURCHASE, LEVEL_UP, ACHIEVEMENT, EVENT, DEFAULT
+
+  @@unique([userId, itemId])
+  @@map("user_avatar_item")
+}
+
+// ==================== CHALLENGES SYSTEM ====================
+
+enum ChallengeType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  SEASONAL
+}
+
+enum ChallengeCategory {
+  TASKS
+  NUTRITION
+  HABITS
+  SOCIAL
+  STREAK
+  FOCUS
+  MIXED
+}
+
+model Challenge {
+  id            String            @id @default(uuid())
+  type          ChallengeType
+  category      ChallengeCategory
+  
+  title         String
+  description   String
+  
+  // Target metrics
+  targetType    String            // e.g., "tasks_completed", "streak_days", "focus_minutes"
+  targetValue   Int
+  
+  // Rewards
+  xpReward      Int               @default(50)
+  itemRewardId  String?           // Optional avatar item reward
+  
+  // Availability
+  levelRequired Int               @default(1)
+  isActive      Boolean           @default(true)
+  
+  // For seasonal challenges
+  startDate     DateTime?
+  endDate       DateTime?
+  
+  createdAt     DateTime          @default(now())
+  
+  progress      ChallengeProgress[]
+
+  @@index([type, isActive])
+  @@map("challenge")
+}
+
+model ChallengeProgress {
+  id           String    @id @default(uuid())
+  userId       String
+  challengeId  String
+  challenge    Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  
+  currentValue Int       @default(0)
+  isCompleted  Boolean   @default(false)
+  completedAt  DateTime?
+  isClaimed    Boolean   @default(false)
+  claimedAt    DateTime?
+  
+  // Period tracking
+  periodStart  DateTime
+  periodEnd    DateTime
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, challengeId, periodStart])
+  @@index([userId, isCompleted])
+  @@map("challenge_progress")
+}
+
+// ==================== CLAN CHALLENGES ====================
+
+model ClanChallenge {
+  id            String    @id @default(uuid())
+  clanId        String
+  
+  title         String
+  description   String
+  
+  targetType    String    // e.g., "collective_tasks", "member_streaks"
+  targetValue   Int
+  
+  xpMultiplier  Float     @default(1.5)
+  bonusXp       Int       @default(100)
+  
+  startDate     DateTime
+  endDate       DateTime
+  
+  currentValue  Int       @default(0)
+  isCompleted   Boolean   @default(false)
+  completedAt   DateTime?
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([clanId, isCompleted])
+  @@map("clan_challenge")
+}
+
+// ==================== TEMPLATE MARKETPLACE ====================
+
+enum TemplateStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+model PublishedTemplate {
+  id            String         @id @default(uuid())
+  templateId    String         // Reference to original TaskTemplate
+  authorId      String
+  
+  title         String
+  description   String
+  category      String
+  tags          String[]
+  
+  // Template data (snapshot)
+  templateData  Json
+  
+  status        TemplateStatus @default(PENDING)
+  
+  // Stats
+  useCount      Int            @default(0)
+  upvotes       Int            @default(0)
+  downvotes     Int            @default(0)
+  
+  isFeatured    Boolean        @default(false)
+  
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  votes         TemplateVote[]
+  comments      TemplateComment[]
+
+  @@index([category, status])
+  @@index([authorId])
+  @@map("published_template")
+}
+
+model TemplateVote {
+  id           String            @id @default(uuid())
+  templateId   String
+  template     PublishedTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userId       String
+  
+  isUpvote     Boolean           // true = upvote, false = downvote
+  
+  createdAt    DateTime          @default(now())
+
+  @@unique([templateId, userId])
+  @@map("template_vote")
+}
+
+model TemplateComment {
+  id           String            @id @default(uuid())
+  templateId   String
+  template     PublishedTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userId       String
+  
+  content      String
+  
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([templateId, createdAt])
+  @@map("template_comment")
+}
+
+// ==================== PRIVACY SETTINGS ====================
+
+enum PrivacyLevel {
+  PUBLIC
+  FRIENDS_ONLY
+  PRIVATE
+}
+
+
